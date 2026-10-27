@@ -1,0 +1,48 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null; }
+    function isMember(tripId) {
+      return signedIn() && exists(/databases/$(database)/documents/trips/$(tripId)/members/$(request.auth.uid));
+    }
+
+    match /trips/{tripId} {
+      allow create: if signedIn()
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.name is string
+        && request.resource.data.currency is string;
+      allow get: if isMember(tripId);
+      allow list: if false;
+      allow update, delete: if isMember(tripId);
+
+      match /members/{uid} {
+        allow read: if isMember(tripId) && (uid == request.auth.uid || isMember(tripId));
+        allow create: if signedIn() && uid == request.auth.uid
+          && request.resource.data.uid == request.auth.uid
+          && (
+            get(/databases/$(database)/documents/trips/$(tripId)).data.ownerUid == request.auth.uid
+            || (
+              request.resource.data.inviteCode is string
+              && get(/databases/$(database)/documents/invites/$(request.resource.data.inviteCode)).data.tripId == tripId
+            )
+          );
+        allow update, delete: if isMember(tripId) && uid == request.auth.uid;
+      }
+
+      match /families/{familyId} {
+        allow read, write: if isMember(tripId);
+      }
+      match /expenses/{expenseId} {
+        allow read, write: if isMember(tripId);
+      }
+    }
+
+    match /invites/{code} {
+      allow get: if signedIn();
+      allow list: if false;
+      allow create: if signedIn() && request.resource.data.tripId is string
+        && isMember(request.resource.data.tripId);
+      allow update, delete: if signedIn() && isMember(resource.data.tripId);
+    }
+  }
+}
